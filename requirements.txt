@@ -1,0 +1,6 @@
+streamlit
+fastapi
+uvicorn
+requests
+langchain-core
+langchain-ollama

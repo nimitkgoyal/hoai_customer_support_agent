@@ -1,0 +1,16 @@
+#Virtual Environment
+.venv/
+
+#Application Logs
+logs/*.log
+*.log
+
+# Python Cache & Compiled Files
+__pycache__/
+*.pyc
+
+# Environment Variables / Secrets
+.env
+
+# Test/Temp Files
+test.py
