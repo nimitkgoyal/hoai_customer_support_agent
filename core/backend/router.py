@@ -1,13 +1,15 @@
+import core.config.tracer  # MUST BE THE ABSOLUTE FIRST LINE
 import time
 import os
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from core.config.logger import logger
 from core.config.llm_engine import local_llm
+from core.guardrails.scanner import scan_input_safety
+
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
-from core.guardrails.scanner import scan_input_safety
 
 app = FastAPI(title="HOAI Agentic Gateway")
 
@@ -20,15 +22,12 @@ class ChatResponse(BaseModel):
     latency_ms: float
     status: str
 
-# Define path to our ingested vector store
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 VECTOR_DB_DIR = os.path.join(BASE_DIR, "data", "vector_store")
 
-# Initialize the exact same embedding model used for ingestion (cached locally)
 logger.info("RAG Engine | Loading local embedding model for retrieval...")
 embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-small-en-v1.5")
 
-# Robust System Prompt template enforcing strict structural retrieval rules
 SYSTEM_INSTRUCTION_TEMPLATE = """You are an elite, highly secure customer support assistant for HOAI SmartHome Systems. 
 Your core directive is to answer customer queries using ONLY the retrieved knowledge blocks provided below.
 
@@ -50,35 +49,26 @@ async def chat_endpoint(request: ChatRequest):
     logger.info(f"Incoming Request | Query: '{request.message[:40]}...' | Simulation: {request.simulate_attack}")
     
     # 1. Check Simulated Guardrail Toggle
-    # Check automated input guardrail scanner
-    if not scan_input_safety(request.message):
-        latency = (time.time() - start_time) * 1000
-        response_msg = "[BLOCKED] Security Guardrail Violation: Out-of-domain query or unauthorized programmatic request detected."
-        return ChatResponse(
-            response=response_msg,
-            latency_ms=round(latency, 2),
-            status="BLOCKED"
-        )
-    
     if request.simulate_attack:
         latency = (time.time() - start_time) * 1000
         response_msg = "[BLOCKED] Security Guardrail Violation: Malicious intent or prompt injection detected."
         logger.warning(f"SECURITY BLOCK | Status: BLOCKED | Latency: {latency:.2f}ms")
         return ChatResponse(response=response_msg, latency_ms=round(latency, 2), status="BLOCKED")
     
+    # 2. Check Automated Semantic Guardrail Middleware
+    if not scan_input_safety(request.message):
+        latency = (time.time() - start_time) * 1000
+        response_msg = "[BLOCKED] Security Guardrail Violation: Out-of-domain query or unauthorized programmatic request detected."
+        return ChatResponse(response=response_msg, latency_ms=round(latency, 2), status="BLOCKED")
+    
+    # 3. Proceed to standard, auto-instrumented RAG pipeline
     try:
-        # 2. Connect to the local vector store
         db = Chroma(persist_directory=VECTOR_DB_DIR, embedding_function=embeddings)
         
-        # 3. Perform semantic search (retrieve the top 2 closest matching chunks)
-        logger.info(f"Vector DB Search | Executing semantic retrieval for: '{request.message[:30]}...'")
+        logger.info(f"Vector DB Search | Executing semantic retrieval...")
         docs = db.similarity_search(request.message, k=2)
-        
-        # 4. Compile chunks into a single unified context string
         retrieved_context = "\n\n".join([doc.page_content for doc in docs])
-        logger.info(f"Vector DB Search | Successfully pulled {len(docs)} relevant text chunks.")
         
-        # 5. Format system instructions with live vector boundaries
         formatted_system_prompt = SYSTEM_INSTRUCTION_TEMPLATE.format(context=retrieved_context)
         
         messages = [

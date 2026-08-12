@@ -8,3 +8,9 @@ langchain-community
 chromadb
 langchain-huggingface
 sentence-transformers
+arize-phoenix
+openinference-instrumentation-langchain
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp
+mcp
